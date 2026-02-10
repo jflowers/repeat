@@ -1,0 +1,265 @@
+# Implementation Plan: Repeat CLI
+
+**Branch**: `001-repeat-cli` | **Date**: 2026-02-01 | **Spec**: [spec.md](./spec.md)
+**Input**: Feature specification for Go CLI rewrite with GCP Gemini API key support
+
+## Summary
+
+Build a Go CLI tool that organizes Google Drive meeting documents and syncs calendar attachments. Task extraction and assignment is handled separately via browser automation (see spec 002). The tool uses OAuth2 for Google Workspace APIs and a GCP API key for Gemini.
+
+## Technical Context
+
+**Language/Version**: Go 1.21+  
+**Primary Dependencies**:
+- `google.golang.org/genai` - Gemini AI SDK
+- `google.golang.org/api/drive/v3` - Drive API
+- `google.golang.org/api/docs/v1` - Docs API
+- `google.golang.org/api/calendar/v3` - Calendar API
+- `github.com/spf13/cobra` - CLI framework
+- `golang.org/x/oauth2/google` - OAuth2 support
+- `github.com/charmbracelet/log` - Structured logging
+- `github.com/charmbracelet/lipgloss` - Terminal styling
+- `github.com/charmbracelet/huh` - Interactive prompts
+
+**Storage**: Local config file (`~/.repeat/config.yaml`) + OAuth token cache  
+**Testing**: `go test ./...` with table-driven tests  
+**Target Platform**: macOS, Linux (cross-platform CLI)  
+**Project Type**: Single CLI application  
+**Performance Goals**: Process 100+ documents in under 5 minutes  
+**Constraints**: Must work with GCP API key (not Gemini Developer API key)  
+**Scale/Scope**: Single-user local CLI tool
+
+## Constitution Check
+
+| Principle | Status | Notes |
+|-----------|--------|-------|
+| CLI-First Architecture | ✅ Pass | All features exposed via CLI commands |
+| API-Key Authentication | ✅ Pass | Gemini uses GCP API key, Workspace uses OAuth2 |
+| Test-Driven Development | ✅ Pass | Unit tests for all business logic planned |
+| Idiomatic Go | ✅ Pass | Standard project layout, context.Context support |
+| Graceful Error Handling | ✅ Pass | Wrapped errors, actionable messages |
+| Observability | ✅ Pass | --verbose and --dry-run flags |
+
+## Project Structure
+
+### Documentation (this feature)
+
+```text
+.specify/specs/001-repeat-cli/
+├── spec.md              # Feature specification
+├── plan.md              # This file
+└── tasks.md             # Task breakdown (created by /speckit.tasks)
+```
+
+### Source Code (repository root)
+
+```text
+repeat/
+├── cmd/
+│   └── repeat/
+│       └── main.go              # Entry point
+├── internal/
+│   ├── auth/
+│   │   ├── oauth.go             # OAuth2 flow for Workspace APIs
+│   │   └── gemini.go            # API key auth for Gemini
+│   ├── config/
+│   │   ├── config.go            # Configuration loading
+│   │   └── env.go               # Environment variable handling
+│   ├── drive/
+│   │   ├── service.go           # Drive operations
+│   │   ├── folder.go            # Folder management
+│   │   └── shortcuts.go         # Shortcut creation
+│   ├── docs/
+│   │   └── service.go           # Docs operations
+│   ├── calendar/
+│   │   ├── service.go           # Calendar operations
+│   │   └── attachments.go       # Attachment handling
+│   ├── gemini/
+│   │   ├── client.go            # Gemini client wrapper
+│   │   ├── prompts.go           # Prompt templates
+│   │   └── parser.go            # JSON response parsing
+│   └── organizer/
+│       ├── organizer.go         # Main orchestration logic
+│       └── workflow.go          # Workflow coordination
+├── pkg/
+│   └── models/
+│       ├── document.go          # Document model
+│       └── meeting.go           # Meeting entities
+├── go.mod
+├── go.sum
+├── .env.example                 # Example environment config
+├── README.md
+└── Makefile                     # Build and test commands
+```
+
+**Structure Decision**: Single CLI application following standard Go project layout. Internal packages for implementation details, `pkg/models` for shared data structures that could potentially be exported.
+
+## Proposed Changes
+
+### Phase 1: Project Setup & Configuration
+
+#### [NEW] `go.mod`
+Initialize Go module with dependencies.
+
+#### [NEW] `cmd/repeat/main.go`
+CLI entry point using Cobra:
+- Root command with global flags (--verbose, --dry-run, --config)
+- Subcommands: `organize`, `sync-calendar`, `assign-tasks`, `run`
+
+#### [NEW] `internal/config/config.go`
+Configuration management:
+- Load from environment variables
+- Load from config file (~/.repeat/config.yaml)
+- Provide defaults
+
+---
+
+### Phase 2: Authentication
+
+#### [NEW] `internal/auth/oauth.go`
+OAuth2 flow for Google Workspace APIs:
+- Interactive browser-based auth for first run
+- Token storage and refresh
+- Scopes: drive, docs, calendar.readonly, tasks
+
+#### [NEW] `internal/auth/gemini.go`
+Gemini authentication:
+- Load API key from environment (`GEMINI_API_KEY`)
+- Configure genai client with API key
+
+---
+
+### Phase 3: Core Services
+
+#### [NEW] `internal/drive/service.go`
+Drive service wrapper:
+- List files with query filters
+- Move files between folders
+- Create folders
+- Create shortcuts
+- Check file ownership
+
+#### [NEW] `internal/docs/service.go`
+Docs service wrapper:
+- Get document content
+- Parse document structure
+
+#### [NEW] `internal/calendar/service.go`
+Calendar service wrapper:
+- List events for date range
+- Extract attachments from events
+- Parse description for Drive links
+
+
+#### [NEW] `internal/gemini/client.go`
+Gemini client wrapper:
+- Initialize with API key
+- Send structured prompts
+- Parse JSON responses
+- Handle errors and retries
+
+---
+
+### Phase 4: Business Logic & CLI Commands
+
+#### [NEW] `internal/organizer/organizer.go`
+Core orchestration:
+- Parse document names
+- Match documents to folders
+- Coordinate service calls
+
+#### [NEW] `pkg/models/*.go`
+Data models for Document, Meeting
+
+#### [MODIFY] `cmd/repeat/main.go`
+Add command implementations:
+- `organize`: Run document organization workflow
+- `sync-calendar`: Sync calendar attachments
+- `run`: Execute full workflow (organize → sync → assign tasks via spec 002)
+
+## Verification Plan
+
+### Automated Tests
+
+Since this is a new Go project, we'll create tests as we build:
+
+1. **Unit Tests** - Create alongside each internal package:
+   ```bash
+   go test ./internal/... -v
+   ```
+
+2. **Config Tests** - Test configuration loading:
+   ```bash
+   go test ./internal/config/... -v
+   ```
+
+3. **Model Tests** - Test data structures and parsing:
+   ```bash
+   go test ./pkg/models/... -v
+   ```
+
+4. **Build Verification**:
+   ```bash
+   go build ./cmd/repeat
+   go vet ./...
+   gofmt -d .
+   ```
+
+### Integration Tests (with mocks)
+
+We'll use interfaces to allow mocking external services:
+```bash
+go test ./internal/... -tags=integration -v
+```
+
+### Manual Verification
+
+1. **Setup Test**:
+   - Run `repeat --help` to verify CLI structure
+   - Expected: Shows available commands and flags
+
+2. **Config Test**:
+   - Set `GEMINI_API_KEY` environment variable
+   - Run `repeat config show`
+   - Expected: Displays merged configuration
+
+3. **Dry Run Test**:
+   - Run `repeat run --dry-run --verbose`
+   - Expected: Shows what would be done without making changes
+
+4. **OAuth Test**:
+   - Run `repeat auth login`
+   - Expected: Opens browser for OAuth flow, stores token
+
+> [!IMPORTANT]
+> **User Verification Required**: After Phase 2 (Authentication), please verify:
+> 1. GCP API key works with Gemini by running a test prompt
+> 2. OAuth flow completes successfully
+> 3. All required scopes are granted
+
+## Complexity Tracking
+
+No constitution violations anticipated. All principles will be followed.
+
+## Dependencies
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| `github.com/spf13/cobra` | latest | CLI framework |
+| `github.com/spf13/viper` | latest | Configuration management |
+| `google.golang.org/genai` | latest | Gemini AI SDK |
+| `google.golang.org/api` | latest | Google Workspace APIs |
+| `golang.org/x/oauth2` | latest | OAuth2 support |
+| `gopkg.in/yaml.v3` | latest | YAML config files |
+| `github.com/charmbracelet/log` | latest | Leveled, colorful structured logging |
+| `github.com/charmbracelet/lipgloss` | latest | Terminal styling and layout |
+| `github.com/charmbracelet/huh` | latest | Interactive terminal prompts |
+
+## Risk Mitigation
+
+| Risk | Mitigation |
+|------|------------|
+| GCP API key vs Gemini Developer API | Research confirms `google.golang.org/genai` supports both; will test early |
+| OAuth token expiry during long runs | Implement token refresh in auth package |
+| Rate limiting on Google APIs | Implement exponential backoff and progress indicators |
+| Gemini JSON parsing failures | Robust parsing with fallbacks, skip items on failure |
