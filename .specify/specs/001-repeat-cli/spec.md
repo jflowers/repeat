@@ -1,4 +1,4 @@
-# Feature Specification: Meeting Organizer & Action Item Tracker CLI
+# Feature Specification: Meeting Organizer CLI
 
 **Feature Branch**: `001-repeat-cli`  
 **Created**: 2026-02-01  
